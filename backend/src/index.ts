@@ -20,13 +20,26 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-async function start() {
-  console.log("Connecting to Endee...");
-  await ensureIndex(); // creates the index if it doesn't exist
+// Global error handler
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ success: false, message: "Internal server error" });
+});
 
-  app.listen(PORT, () => {
-    console.log(`✅ Backend running at http://localhost:${PORT}`);
-  });
+async function start() {
+  try {
+    console.log("Connecting to Endee...");
+    await ensureIndex().catch((error) => {
+      console.warn("Warning: ensureIndex failed, continuing in degraded mode:", error);
+    });
+
+    app.listen(PORT, () => {
+      console.log(`✅ Backend running at http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  }
 }
 
 start();

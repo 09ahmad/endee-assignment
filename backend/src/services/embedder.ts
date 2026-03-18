@@ -1,45 +1,43 @@
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-let openai: OpenAI | null = null;
+let genAI: GoogleGenerativeAI | null = null;
 
-function getOpenAI(): OpenAI {
-  if (!openai) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY is not set.");
-    openai = new OpenAI({ apiKey });
+function getGenAI(): GoogleGenerativeAI {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY is not set.");
+    genAI = new GoogleGenerativeAI(apiKey);
   }
-  return openai;
+  return genAI;
 }
 
-const MODEL = "text-embedding-3-small";
+const EMBEDDING_MODEL = "gemini-embedding-001";
 const CHUNK_SIZE = 500;
 const CHUNK_OVERLAP = 50;
 
 // ── Embed a single string ─────────────────────────────────────
 export async function embedText(text: string): Promise<number[]> {
-  const res = await getOpenAI().embeddings.create({
-    model: MODEL,
-    input: text.trim(),
-  });
-
-  const embedding = res.data[0]?.embedding;
-  if (!embedding) throw new Error("No embedding returned from OpenAI.");
+  const model = getGenAI().getGenerativeModel({ model: EMBEDDING_MODEL });
+  const result = await model.embedContent(text.trim());
+  const embedding = result.embedding?.values;
+  if (!embedding) throw new Error("No embedding returned from Gemini.");
   return embedding;
 }
 
 // ── Embed multiple strings in one API call ────────────────────
 export async function embedBatch(texts: string[]): Promise<number[][]> {
-  const res = await getOpenAI().embeddings.create({
-    model: MODEL,
-    input: texts.map((t) => t.trim()),
-  });
+  const model = getGenAI().getGenerativeModel({ model: EMBEDDING_MODEL });
 
-  return res.data
-    .sort((a, b) => a.index - b.index)
-    .map((d) => {
-      if (!d.embedding) throw new Error(`Missing embedding at index ${d.index}`);
-      return d.embedding;
-    });
+  // Gemini doesn't have a true batch endpoint — run in parallel
+  const results = await Promise.all(
+    texts.map((t) => model.embedContent(t.trim()))
+  );
+
+  return results.map((r, i) => {
+    const embedding = r.embedding?.values;
+    if (!embedding) throw new Error(`Missing embedding at index ${i}`);
+    return embedding;
+  });
 }
 
 // ── Types ─────────────────────────────────────────────────────
@@ -62,7 +60,6 @@ export function chunkText(rawText: string, source: string): TextChunk[] {
   for (const sentence of sentences) {
     if (current.length + sentence.length > CHUNK_SIZE && current.length > 0) {
       chunks.push({ text: current.trim(), source, chunkIndex: index++ });
-
       const words = current.split(" ");
       current =
         words.slice(-Math.floor(CHUNK_OVERLAP / 5)).join(" ") +
